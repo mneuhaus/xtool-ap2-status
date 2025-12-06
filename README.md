@@ -245,38 +245,60 @@ Simple responsive HTML page served from ESP32-S3 flash.
 
 ### Framework
 
-**ESP-IDF** with LVGL for display/touch.
+**Arduino IDE** with LVGL for display/touch. Uses `arduino-cli` for command-line builds.
+
+### Quick Start
+
+```bash
+# First time setup
+make setup
+
+# Build and flash
+make flash
+
+# Monitor serial output
+make monitor
+
+# Or all at once
+make all
+```
+
+### Available Make Commands
+
+| Command | Description |
+|---------|-------------|
+| `make setup` | Install ESP32 core + libraries |
+| `make flash` | Compile and upload |
+| `make monitor` | Serial monitor |
+| `make all` | Flash + monitor |
+| `make clean` | Clean build |
+| `make boards` | List connected boards |
+| `make config` | Show configuration |
 
 ### Dependencies
 
-- ESP-IDF 5.x
-- LVGL 8.x
-- NimBLE (for Bluetooth)
-- esp_http_server (for web API)
-
-### Build
-
-```bash
-idf.py set-target esp32s3
-idf.py build
-idf.py flash monitor
-```
+Installed automatically via `make setup`:
+- ESP32 Arduino Core
+- LVGL
+- GFX Library for Arduino
+- TFT_eSPI
 
 ### Pin Configuration (Waveshare ESP32-S3-Touch-LCD-2)
 
-| Function | GPIO |
-|----------|------|
-| LCD_CS | 37 |
-| LCD_DC | 38 |
-| LCD_RST | 39 |
-| LCD_BL | 40 |
-| LCD_CLK | 41 |
-| LCD_MOSI | 42 |
-| TOUCH_INT | 4 |
-| TOUCH_SDA | 5 |
-| TOUCH_SCL | 6 |
-| USB_D+ | 20 |
-| USB_D- | 19 |
+| Function | GPIO | Description |
+|----------|------|-------------|
+| LCD_CS | 37 | SPI Chip Select |
+| LCD_DC | 38 | Data/Command |
+| LCD_RST | 39 | Reset |
+| LCD_BL | 40 | Backlight |
+| LCD_SCLK | 41 | SPI Clock |
+| LCD_MOSI | 42 | SPI Data |
+| TOUCH_SDA | 5 | I2C Data |
+| TOUCH_SCL | 6 | I2C Clock |
+| TOUCH_INT | 4 | Touch Interrupt |
+| USB_D+ | 20 | USB OTG |
+| USB_D- | 19 | USB OTG |
+| BAT_ADC | 1 | Battery Voltage |
 
 ---
 
@@ -284,19 +306,9 @@ idf.py flash monitor
 
 ```
 xtool-ap2-status/
-├── main/
-│   ├── main.c              # Entry point
-│   ├── ap2_protocol.c      # F0F7 protocol implementation
-│   ├── ap2_protocol.h
-│   ├── ble_client.c        # BLE communication
-│   ├── usb_host.c          # USB-OTG dongle support
-│   ├── display.c           # LVGL UI
-│   ├── webserver.c         # HTTP API
-│   └── wifi.c              # WiFi management
-├── components/
-│   └── lvgl/               # LVGL library
-├── CMakeLists.txt
-├── sdkconfig
+├── firmware/
+│   └── ap2-status.ino      # Main Arduino sketch
+├── Makefile                # Build system
 └── README.md
 ```
 
