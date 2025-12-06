@@ -41,10 +41,25 @@ A compact, standalone device that displays:
 
 ### Option 1: Direct BLE (Preferred)
 
-If the AP2 exposes BLE services directly:
-- ESP32-S3 connects via Bluetooth LE
-- No additional hardware needed
-- **Status:** Needs testing with nRF Connect app
+The AP2 has **built-in Bluetooth** - the xTool dongle is only needed for laser machines to connect to the AP2. We should be able to connect directly from the ESP32-S3.
+
+**Status:** Needs BLE service discovery - see "BLE Scanning" section below.
+
+**Architecture (xTool Studio):**
+```
+xTool Studio App
+      ↓ (USB Serial / CH340)
+xTool BLE Dongle  ←-- only for LASER MACHINES
+      ↓ (BLE)
+AP2 Air Purifier  ←-- has built-in BLE!
+```
+
+**Our Goal:**
+```
+ESP32-S3 Touch Display
+      ↓ (BLE - direct connection)
+AP2 Air Purifier
+```
 
 ### Option 2: USB-OTG with Original Dongle
 
@@ -61,6 +76,37 @@ If direct BLE doesn't work:
 | VID | `1a86` |
 | PID | `7523` |
 | Baud | 115200 |
+
+---
+
+## BLE Scanning (TODO)
+
+To discover the AP2's BLE services, use **nRF Connect** app (iOS/Android):
+
+### Steps:
+1. Power on the AP2
+2. Open nRF Connect and scan for devices
+3. Look for a device named `xTool-*` or similar
+4. Connect and explore services
+
+### What to Look For:
+
+The AP2 likely uses a **BLE UART** service. Common UUIDs:
+
+| Service | UUID |
+|---------|------|
+| Nordic UART Service | `6E400001-B5A3-F393-E0A9-E50E24DCCA9E` |
+| Nordic UART TX | `6E400002-B5A3-F393-E0A9-E50E24DCCA9E` |
+| Nordic UART RX | `6E400003-B5A3-F393-E0A9-E50E24DCCA9E` |
+| HM-10 BLE Serial | `0000FFE0-0000-1000-8000-00805F9B34FB` |
+| HM-10 Characteristic | `0000FFE1-0000-1000-8000-00805F9B34FB` |
+
+### Record:
+- [ ] Device advertisement name
+- [ ] Primary service UUID
+- [ ] TX characteristic UUID (write to AP2)
+- [ ] RX characteristic UUID (read from AP2)
+- [ ] Any security/pairing requirements
 
 ---
 
@@ -84,11 +130,30 @@ CHECKSUM = sum(COMMAND_BODY) & 0x7F
 const uint8_t AP2_PREFIX[] = {0x4C, 0x73, 0x6B, 0x01, 0x00};
 ```
 
-### Device ID
+### Device IDs (AccessoriesType)
 
-| Device | Hex | Decimal |
-|--------|-----|---------|
-| AP2 (LargePurifierV3) | `4C` | 76 |
+From xTool Studio code analysis:
+
+| Device | Hex | Decimal | Internal Name |
+|--------|-----|---------|---------------|
+| AP2 (V3/Max) | `4C` | 76 | LargePurifierV3 |
+| AP2 (V2) | `45` | 69 | LargePurifier |
+| IF2 Duct Fan V3 | `4E` | 78 | DuctFanV3 |
+| IF2 Duct Fan | `46` | 70 | DuctFan |
+| Fire Extinguisher | `4A` | 74 | FireExtinguisher |
+| UV Sensor | `4B` | 75 | UvSensor |
+| Air Pump V2 | `40` | 64 | AirPumpV2 |
+| Air Pump | `3D` | 61 | AirPump |
+| Purifier (small) | `34` | 52 | Purifier |
+
+### Firmware Names
+
+| Device | Firmware Key |
+|--------|--------------|
+| AP2 Max | `xTool-BigPurifier2.0-max-firmware` |
+| AP2 | `xTool-bigPurifier-firmware` |
+| IF2 V3 | `xTool-ductFan2.0-firmware` |
+| Dongle | `xTool-dongle-firmware` |
 
 ---
 
