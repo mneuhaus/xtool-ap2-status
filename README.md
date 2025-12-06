@@ -1,138 +1,138 @@
 # xTool AP2 Air Purifier Status Monitor
 
-Reverse-engineered protocol documentation and status monitor for the xTool AP2 Air Purifier.
+Standalone status monitor for the xTool AP2 Air Purifier using a **Waveshare ESP32-S3 2" Touch Display**.
 
 ## Project Goal
 
-Build a Raspberry Pi Pico W (or ESP32-S3) with TFT display showing:
-- Filter status (all 6 filter elements)
-- Fan speed / gear
-- Auto/Manual mode
+A compact, standalone device that displays:
+- Real-time filter status (all 6 filter elements with progress bars)
+- Fan speed and mode (Auto/Manual)
+- Touch controls to adjust settings
 - Web interface for remote monitoring
 
-## Protocol Documentation
+## Hardware
 
-### Communication Architecture
+### Waveshare ESP32-S3 2" Capacitive Touch Display
 
-- **USB-Dongle**: CH340 USB-Serial Chip (VID: `1a86`, PID: `7523`)
-- **Baud Rate**: `115200`
-- **Protocol**: F0F7 Frame-based with M-Codes
+| Spec | Value |
+|------|-------|
+| MCU | ESP32-S3 (Dual-Core LX7, 240MHz) |
+| Display | 2.0" IPS LCD, 240×320 pixels, 262K colors |
+| Touch | Capacitive touch (CST816S) |
+| Connectivity | WiFi 802.11 b/g/n + Bluetooth 5 (BLE) |
+| USB | USB-C with USB-OTG support |
+| Flash | 16MB |
+| PSRAM | 2MB |
+| Camera | OV2640 (not used in this project) |
 
-### F0F7 Protocol Frame Format
+**Product Link:** [Waveshare ESP32-S3-Touch-LCD-2](https://www.waveshare.com/esp32-s3-touch-lcd-2.htm)
 
-```
-[START_BYTE 0xF0] [COMMAND_BODY] [CHECKSUM] [END_BYTE 0xF7]
+### Why This Board?
 
-COMMAND_BODY = [PREFIX_BYTES] + [COMMAND_STRING] + [DELIMITER \n]
-```
-
-#### Protocol Constants
-
-| Constant | Value | Description |
-|----------|-------|-------------|
-| START_BYTE | `0xF0` (240) | Frame start marker |
-| END_BYTE | `0xF7` (247) | Frame end marker |
-| CHECKSUM_MASK | `0x7F` (127) | Only lower 7 bits |
-| DELIMITER | `\n` | Command terminator |
-
-#### Checksum Calculation
-
-```javascript
-function calculateChecksum(commandBody) {
-  let sum = 0;
-  for (let i = 0; i < commandBody.length; i++) {
-    sum += commandBody[i];
-  }
-  return sum & 0x7F;
-}
-```
-
-### Device Identification
-
-#### AccessoriesType Enum
-
-| Type | Hex ID | Decimal | Description |
-|------|--------|---------|-------------|
-| LargePurifierV3 | `4C` | 76 | **AP2 Air Purifier** |
-| LargePurifier | `45` | 69 | AP1 Air Purifier (older) |
-| DuctFanV3 | `4E` | 78 | Inline Fan V3 |
-| DuctFan | `46` | 70 | Inline Fan V1 |
-| AirPumpV2 | `40` | 64 | Air Assist Pump V2 |
-| AirPump | `3D` | 61 | Air Assist Pump V1 |
-| Purifier | `34` | 52 | Small Purifier |
-
-#### Prefix Bytes (for F0F7 Frame)
-
-```javascript
-// AP2 (LargePurifierV3) - This project's target
-const AP2_PREFIX = [76, 115, 107, 1, 0];  // 0x4C 0x73 0x6B 0x01 0x00
-
-// AP1 (LargePurifier) - For reference
-const AP1_PREFIX = [69, 115, 96, 1, 0];   // 0x45 0x73 0x60 0x01 0x00
-
-// DuctFan V3
-const DUCTFAN_V3_PREFIX = [78, 115, 99, 1, 0];  // 0x4E 0x73 0x63 0x01 0x00
-```
+1. **All-in-One** - Display + Touch + MCU in one unit, no wiring needed
+2. **USB-OTG** - Can host the original xTool BLE dongle if needed
+3. **Native BLE** - Can connect directly to AP2 (if BLE is exposed)
+4. **Compact** - Perfect size for a status monitor
+5. **Touch UI** - Adjust fan speed directly on device
 
 ---
 
-## AP2 Commands (LargePurifierV3)
+## Communication Options
+
+### Option 1: Direct BLE (Preferred)
+
+If the AP2 exposes BLE services directly:
+- ESP32-S3 connects via Bluetooth LE
+- No additional hardware needed
+- **Status:** Needs testing with nRF Connect app
+
+### Option 2: USB-OTG with Original Dongle
+
+If direct BLE doesn't work:
+- Connect original xTool BLE dongle via USB-OTG
+- ESP32-S3 acts as USB host
+- Communicate via USB-Serial (CH340)
+
+### Original Dongle Specs
+
+| Spec | Value |
+|------|-------|
+| Chip | CH340 USB-Serial |
+| VID | `1a86` |
+| PID | `7523` |
+| Baud | 115200 |
+
+---
+
+## Protocol Documentation
+
+### F0F7 Frame Format
+
+```
+┌──────────┬──────────────┬──────────┬──────────┐
+│ START    │ COMMAND_BODY │ CHECKSUM │ END      │
+│ 0xF0     │ ...          │ 1 byte   │ 0xF7     │
+└──────────┴──────────────┴──────────┴──────────┘
+
+COMMAND_BODY = PREFIX + COMMAND + '\n'
+CHECKSUM = sum(COMMAND_BODY) & 0x7F
+```
+
+### AP2 Prefix Bytes
+
+```c
+const uint8_t AP2_PREFIX[] = {0x4C, 0x73, 0x6B, 0x01, 0x00};
+```
+
+### Device ID
+
+| Device | Hex | Decimal |
+|--------|-----|---------|
+| AP2 (LargePurifierV3) | `4C` | 76 |
+
+---
+
+## AP2 Commands
 
 ### M9033 - Get Status
 
-**Request:**
 ```
-M9033
-```
-
-**Response Format:**
-```
-A<version> V<speed>|W<speed> H<val> I<val> J<val> K<val> L<val> M<val> F<buzzer> E:<serial>
+Request:  M9033
+Response: A<ver> V<spd>|W<spd> H<n> I<n> J<n> K<n> L<n> M<n> F<b> E:<sn>
 ```
 
-**Example Response:**
+**Example:**
 ```
-A1.2.3 V3 H95 I87 J100 K100 L78 M92 F1 E:ABC123XYZ
+A1.2.3 V3 H95 I87 J100 K100 L78 M92 F1 E:XYZ123
 ```
-
-#### Response Fields
 
 | Field | Description | Values |
 |-------|-------------|--------|
-| `A<version>` | Firmware version | e.g., `A1.2.3` |
-| `V<speed>` | Auto mode speed | 0-4 (present = auto mode active) |
-| `W<speed>` | Manual mode speed | 0-4 (present = manual mode active) |
+| `A` | Firmware version | String |
+| `V` | Auto mode speed | 0-4 (present = auto mode) |
+| `W` | Manual mode speed | 0-4 (present = manual mode) |
 | `H` | Pre-Filter | 0-100% or -1 |
 | `I` | Medium Filter | 0-100% or -1 |
 | `J` | Activated Carbon | 0-100% or -1 |
 | `K` | Carbon Cloth | 0-100% or -1 |
-| `L` | Formaldehyde Removal (AP2 Max only) | 0-100% or -1 |
+| `L` | Formaldehyde (AP2 Max) | 0-100% or -1 |
 | `M` | HEPA Filter | 0-100% or -1 |
-| `F<0\|1>` | Buzzer enabled | 0=off, 1=on |
-| `E:<serial>` | Serial number | String |
+| `F` | Buzzer | 0=off, 1=on |
+| `E:` | Serial number | String |
 
-#### Filter Value Interpretation
-
-| Value | Meaning |
-|-------|---------|
-| 0-100 | Remaining life percentage |
-| -1 | Filter not detected (RFID tag missing/defective) |
-| ≤10 | Low filter life warning threshold |
+**Filter Values:**
+- `0-100` = Remaining life %
+- `-1` = Not detected (RFID missing)
+- `≤10` = Low life warning
 
 ### M9039 - Set Fan Speed
 
 | Command | Function |
 |---------|----------|
-| `M9039 V<0-4>` | Set auto mode speed |
-| `M9039 W<0-4>` | Set manual mode speed |
-| `M9039 C<0-4>` | Set gear directly (AP1 compatibility) |
+| `M9039 V<0-4>` | Auto mode speed |
+| `M9039 W<0-4>` | Manual mode speed |
 
-**Speed Levels:**
-- `0` = Off
-- `1` = Low
-- `2` = Medium-Low
-- `3` = Medium-High
-- `4` = High
+**Speed Levels:** 0=Off, 1=Low, 2=Med-Low, 3=Med-High, 4=High
 
 ### M9046 - Buzzer Control
 
@@ -141,226 +141,195 @@ A1.2.3 V3 H95 I87 J100 K100 L78 M92 F1 E:ABC123XYZ
 | `M9046 F0` | Buzzer off |
 | `M9046 F1` | Buzzer on |
 
-### M9032 - Get RC Version
-
-```
-M9032
-```
-Returns firmware RC version.
-
-### M9055 - Filter Life Debug (Testing Only!)
-
-```
-M9055 W<which> A<which> B<total> C<used>
-```
-Used internally for filter life simulation/testing.
-
----
-
-## Passthrough Commands (G198)
-
-When communicating through the xTool laser (not direct BLE), commands are wrapped:
-
-```
-G198 P<accessory_id> "<command>"
-```
-
-### Examples
-
-| Command | Function |
-|---------|----------|
-| `G198 P76 "M9033"` | Get AP2 status |
-| `G198 P76 "M9039 V3"` | Set AP2 to auto mode speed 3 |
-| `G198 P76 "M9039 W2"` | Set AP2 to manual mode speed 2 |
-| `G198 P76 "M9039 V0"` | Turn AP2 off |
-| `G198 P76 "M9046 F1"` | Enable AP2 buzzer |
-
 ---
 
 ## Filter Types
 
-### AP2 Max (6 Filters)
+| ID | Filter | Color Code |
+|----|--------|------------|
+| H | Pre-Filter | Gray |
+| I | Medium Filter | Blue |
+| J | Activated Carbon | Black |
+| K | Carbon Cloth | Dark Gray |
+| L | Formaldehyde Removal* | Green |
+| M | HEPA | White |
 
-| Field | Filter Type | German | Typical Lifetime |
-|-------|-------------|--------|------------------|
-| H | Pre-Filter | Vorfilter | ~300h |
-| I | Medium Filter | Mittelfilter | ~300h |
-| J | Activated Carbon | Aktivkohlefilter | ~300h |
-| K | Carbon Cloth | Kohletuch | ~300h |
-| L | Formaldehyde Removal | Formaldehydfilter | ~300h |
-| M | High Efficiency (HEPA) | HEPA-Filter | ~300h |
-
-### AP2 Standard (5 Filters)
-
-Same as above, but without the `L` (Formaldehyde Removal) filter.
+*Only on AP2 Max
 
 ### RFID Recognition
 
-Filters are recognized internally via **RFID tags**. The firmware tracks:
-- Whether a filter is inserted (value or -1)
-- Remaining lifetime as percentage
-- Filter authenticity (original vs. third-party)
-
-The software only receives percentage values - all RFID handling is internal to the AP2 firmware.
+Filters use internal RFID tags. The AP2 firmware handles:
+- Filter detection (present/missing)
+- Usage tracking (remaining %)
+- Authenticity verification
 
 ---
 
-## Error Codes
+## Display UI Design (240×320)
 
-| Code | Meaning |
-|------|---------|
-| `m9039_delete` | Purifier stopped abnormally |
-| `m9039_s4` | Filter life low |
-| `m9039_s2` | Filter not correctly inserted |
-| `m9039_s1` | Filter door not closed |
-| `NFC_ERROR` | RFID/NFC read error |
-| `MULTIPLE IDENTICAL FILTER` | Duplicate filter RFID detected |
+```
+┌────────────────────────┐
+│   xTool AP2 Monitor    │  ← Header (32px)
+├────────────────────────┤
+│  ┌──────────────────┐  │
+│  │ FAN  ████░  3    │  │  ← Fan gauge + speed
+│  │ [AUTO]    [MAN]  │  │  ← Touch mode buttons
+│  └──────────────────┘  │
+├────────────────────────┤
+│  H Pre     ████████ 85 │  ← Filter bars
+│  I Med     ██████░░ 62 │
+│  J Carbon  ██████████ 100│
+│  K Cloth   █████████ 95 │
+│  L Formal  ████░░░░ 45 ⚠│  ← Warning icon
+│  M HEPA    ███████░ 78 │
+├────────────────────────┤
+│  WiFi ✓  192.168.1.42  │  ← Status bar (24px)
+└────────────────────────┘
+```
+
+### Touch Interactions
+
+| Area | Action |
+|------|--------|
+| AUTO button | Switch to auto mode |
+| MAN button | Switch to manual mode |
+| Fan gauge | Swipe to adjust speed |
+| Filter bar | Show filter details |
+| IP address | Open web interface QR |
 
 ---
 
-## State Object (JavaScript Reference)
+## Web Interface
 
-```javascript
-// LargePurifierV3 (AP2) State
-{
-  accessoryVersion: "",      // Firmware version e.g., "1.2.3"
-  snCode: "",                // Serial number
-  purifierGear: 0,           // 0=off, 1-4=speed levels
-  isAuto: false,             // Auto mode active
-  purifierTimeout: 0,        // Run-on time in ms
-  purifierBuzzerEnable: false,
+### REST API
 
-  // Filter life (percent, 0-100, -1=not detected)
-  filterElementH: -1,        // Pre-Filter
-  filterElementI: -1,        // Medium Filter
-  filterElementJ: -1,        // Activated Carbon
-  filterElementK: -1,        // Carbon Cloth
-  filterElementL: -1,        // Formaldehyde Removal (AP2 Max only)
-  filterElementM: -1         // HEPA Filter
-}
-```
-
----
-
-## Hardware Options
-
-### Option A: Raspberry Pi Pico W (BLE)
-
-| Component | Description | Price |
-|-----------|-------------|-------|
-| Raspberry Pi Pico W | RP2040 + WiFi + BLE | ~8€ |
-| TFT Display 2.4" ILI9341 | 320x240, SPI | ~10€ |
-| 3D Printed Case | Optional | - |
-
-**Pros:** Cheap, low power, native BLE
-**Cons:** No USB-Host (can't use original dongle)
-
-### Option B: ESP32-S3 (USB-OTG)
-
-| Component | Description | Price |
-|-----------|-------------|-------|
-| ESP32-S3 DevKit | Dual-Core + WiFi + BLE + USB-OTG | ~12€ |
-| TFT Display 2.4" ILI9341 | 320x240, SPI | ~10€ |
-
-**Pros:** Can use original dongle via USB-OTG, powerful
-**Cons:** Slightly more expensive
-
-### Option C: Raspberry Pi Zero 2 W
-
-Full Linux with USB-Host capability. Best for complex setups.
-
----
-
-## Pinout (Pico W → TFT ILI9341)
-
-```
-Pico W          TFT ILI9341
--------         -----------
-GP18 (SCK)  →   CLK
-GP19 (MOSI) →   MOSI
-GP17        →   CS
-GP20        →   DC
-GP21        →   RST
-3V3         →   VCC
-GND         →   GND
-GP16 (MISO) →   MISO (optional)
-```
-
----
-
-## Planned Features
-
-### Display UI
-```
-┌──────────────────────────┐
-│  xTool AP2 Monitor       │
-├──────────────────────────┤
-│  Fan: ████░░ Gear 3      │
-│  Mode: Auto              │
-│                          │
-│  Filters:                │
-│  H ████████░░ 85%        │
-│  I ██████░░░░ 62%        │
-│  J ██████████ 100%       │
-│  K █████████░ 95%        │
-│  L ████░░░░░░ 45%  ⚠     │
-│  M ███████░░░ 78%        │
-│                          │
-│  WiFi: ✓  192.168.1.42   │
-└──────────────────────────┘
-```
-
-### Web Interface API
-
-**Endpoint:** `http://<device-ip>/api/status`
-
+**GET** `/api/status`
 ```json
 {
   "connected": true,
-  "device": "AP2 Max",
   "firmware": "1.2.3",
-  "serial": "ABC123XYZ",
+  "serial": "XYZ123",
   "fan": {
-    "gear": 3,
-    "auto": true
+    "speed": 3,
+    "mode": "auto"
   },
   "filters": {
-    "H": { "name": "Pre-Filter", "percent": 85 },
-    "I": { "name": "Medium Filter", "percent": 62 },
-    "J": { "name": "Activated Carbon", "percent": 100 },
-    "K": { "name": "Carbon Cloth", "percent": 95 },
-    "L": { "name": "Formaldehyde", "percent": 45, "warning": true },
-    "M": { "name": "HEPA", "percent": 78 }
+    "H": {"name": "Pre-Filter", "percent": 85},
+    "I": {"name": "Medium", "percent": 62},
+    "J": {"name": "Carbon", "percent": 100},
+    "K": {"name": "Cloth", "percent": 95},
+    "L": {"name": "Formaldehyde", "percent": 45, "warning": true},
+    "M": {"name": "HEPA", "percent": 78}
   },
   "buzzer": true
 }
 ```
 
+**POST** `/api/fan`
+```json
+{"speed": 3, "mode": "auto"}
+```
+
+**POST** `/api/buzzer`
+```json
+{"enabled": true}
+```
+
+### Web Dashboard
+
+Simple responsive HTML page served from ESP32-S3 flash.
+
 ---
 
-## TODO
+## Development
 
-- [ ] BLE scan with nRF Connect - is AP2 directly accessible?
-- [ ] Live traffic sniffing (if xTool laser access available)
-- [ ] Determine exact BLE service/characteristic UUIDs
-- [ ] Hardware prototype
-- [ ] MicroPython/CircuitPython firmware
-- [ ] Web interface
-- [ ] 3D printed case
-- [ ] Home Assistant integration (optional)
+### Framework
+
+**ESP-IDF** with LVGL for display/touch.
+
+### Dependencies
+
+- ESP-IDF 5.x
+- LVGL 8.x
+- NimBLE (for Bluetooth)
+- esp_http_server (for web API)
+
+### Build
+
+```bash
+idf.py set-target esp32s3
+idf.py build
+idf.py flash monitor
+```
+
+### Pin Configuration (Waveshare ESP32-S3-Touch-LCD-2)
+
+| Function | GPIO |
+|----------|------|
+| LCD_CS | 37 |
+| LCD_DC | 38 |
+| LCD_RST | 39 |
+| LCD_BL | 40 |
+| LCD_CLK | 41 |
+| LCD_MOSI | 42 |
+| TOUCH_INT | 4 |
+| TOUCH_SDA | 5 |
+| TOUCH_SCL | 6 |
+| USB_D+ | 20 |
+| USB_D- | 19 |
+
+---
+
+## Project Structure
+
+```
+xtool-ap2-status/
+├── main/
+│   ├── main.c              # Entry point
+│   ├── ap2_protocol.c      # F0F7 protocol implementation
+│   ├── ap2_protocol.h
+│   ├── ble_client.c        # BLE communication
+│   ├── usb_host.c          # USB-OTG dongle support
+│   ├── display.c           # LVGL UI
+│   ├── webserver.c         # HTTP API
+│   └── wifi.c              # WiFi management
+├── components/
+│   └── lvgl/               # LVGL library
+├── CMakeLists.txt
+├── sdkconfig
+└── README.md
+```
+
+---
+
+## Roadmap
+
+- [x] Protocol documentation
+- [ ] BLE scan - test if AP2 is directly accessible
+- [ ] ESP-IDF project setup
+- [ ] LVGL display driver for Waveshare board
+- [ ] F0F7 protocol implementation
+- [ ] BLE client (direct connection)
+- [ ] USB-OTG host (dongle fallback)
+- [ ] Touch UI with filter bars
+- [ ] Web API server
+- [ ] OTA updates
+- [ ] 3D printed case/stand
+- [ ] Home Assistant integration
 
 ---
 
 ## References
 
-- Protocol reverse-engineered from xTool Studio app (Electron/ASAR)
-- Device extensions extracted from `exts.zip`
-- M-Codes documented from decompiled JavaScript
+- Protocol reverse-engineered from xTool Studio (Electron app)
+- Waveshare Wiki: [ESP32-S3-Touch-LCD-2](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-2)
+- ESP-IDF: [docs.espressif.com](https://docs.espressif.com/projects/esp-idf/)
+- LVGL: [docs.lvgl.io](https://docs.lvgl.io/)
 
 ## License
 
-MIT License - Use at your own risk. This is unofficial and not affiliated with xTool.
+MIT License - Use at your own risk.
 
 ## Disclaimer
 
-This project is for educational purposes. Modifying or controlling your AP2 with unofficial tools may void your warranty.
+This is an unofficial project, not affiliated with xTool. Use at your own risk.
