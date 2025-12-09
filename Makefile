@@ -4,9 +4,9 @@
 
 # Project Configuration
 SKETCH := ap2-status.ino
-SKETCH_DIR := firmware
-BOARD_FQBN := esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi
-PORT := $(shell arduino-cli board list | grep -i "esp32\|usb" | awk '{print $$1}' | head -n 1)
+SKETCH_DIR := ap2-status
+BOARD_FQBN := esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB
+PORT := $(shell arduino-cli board list | grep "usbmodem" | awk '{print $$1}' | head -n 1)
 BAUD := 115200
 
 # Colors for output
@@ -74,6 +74,8 @@ setup: check-cli
 	@arduino-cli lib install "lvgl"
 	@arduino-cli lib install "GFX Library for Arduino"
 	@arduino-cli lib install "TFT_eSPI"
+	@arduino-cli lib install "NimBLE-Arduino"
+	@arduino-cli lib install "ArduinoJson"
 	@echo ""
 	@echo "$(GREEN)╔════════════════════════════════════════════════════════════╗$(NC)"
 	@echo "$(GREEN)║  ✓ Setup complete!                                         ║$(NC)"
@@ -149,7 +151,7 @@ config: check-cli
 	@arduino-cli core list | grep esp32 || echo "  $(YELLOW)ESP32 core not installed. Run: make setup$(NC)"
 	@echo ""
 	@echo "$(GREEN)Installed libraries:$(NC)"
-	@arduino-cli lib list | grep -iE "lvgl|gfx|tft" || echo "  $(YELLOW)Required libraries not installed. Run: make setup$(NC)"
+	@arduino-cli lib list | grep -iE "lvgl|gfx|tft|nimble|json" || echo "  $(YELLOW)Required libraries not installed. Run: make setup$(NC)"
 
 .PHONY: update
 update: check-cli
