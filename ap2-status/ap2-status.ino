@@ -71,11 +71,11 @@ String ap2Address = "";  // Will be found by scanning
 #define BUZZER_PIN 4
 #define USE_VIBRATION_MOTOR true  // true = piezo vibrator, false = passive buzzer
 
-// SD Card pins (directly on Waveshare ESP32-S3-Touch-LCD-2 TF slot)
+// SD Card pins (from Waveshare demo - shared with LCD SPI)
 #define SD_CS    41
-#define SD_MOSI  40  // Directly on TF socket
-#define SD_MISO  13
-#define SD_SCK   12
+#define SD_MOSI  38
+#define SD_MISO  40
+#define SD_SCK   39
 
 #define SCREEN_WIDTH  240
 #define SCREEN_HEIGHT 320
@@ -459,21 +459,21 @@ void showResetDialog() {
   if (resetDialog != NULL) return;
   dialogShown = true;
 
-  // Create modal background - larger dialog
+  // Create modal background - larger dialog for big buttons
   resetDialog = lv_obj_create(lv_scr_act());
-  lv_obj_set_size(resetDialog, 220, 220);
+  lv_obj_set_size(resetDialog, 230, 300);
   lv_obj_center(resetDialog);
   lv_obj_set_style_bg_color(resetDialog, COLOR_CARD, 0);
   lv_obj_set_style_border_color(resetDialog, COLOR_CYAN, 0);
   lv_obj_set_style_border_width(resetDialog, 2, 0);
   lv_obj_set_style_radius(resetDialog, 10, 0);
-  lv_obj_set_style_pad_all(resetDialog, 15, 0);
+  lv_obj_set_style_pad_all(resetDialog, 12, 0);
 
   // Title (ASCII only - no umlauts)
   lv_obj_t *title = lv_label_create(resetDialog);
   lv_label_set_text(title, "Zyklon gereinigt?");
   lv_obj_set_style_text_color(title, COLOR_WHITE, 0);
-  lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
   lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 5);
 
   // Message (ASCII only)
@@ -484,30 +484,30 @@ void showResetDialog() {
   lv_obj_set_style_text_align(msg, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_align(msg, LV_ALIGN_TOP_MID, 0, 35);
 
-  // "Ja, zuruecksetzen" button - full width, on top
+  // "Ja, zuruecksetzen" button - BIG for finger touch
   lv_obj_t *btnYes = lv_btn_create(resetDialog);
-  lv_obj_set_size(btnYes, 180, 45);
-  lv_obj_align(btnYes, LV_ALIGN_BOTTOM_MID, 0, -60);
+  lv_obj_set_size(btnYes, 200, 80);
+  lv_obj_align(btnYes, LV_ALIGN_BOTTOM_MID, 0, -95);
   lv_obj_set_style_bg_color(btnYes, COLOR_GREEN, 0);
-  lv_obj_set_style_radius(btnYes, 6, 0);
+  lv_obj_set_style_radius(btnYes, 8, 0);
   lv_obj_add_event_cb(btnYes, resetDialogCallback, LV_EVENT_PRESSED, (void*)1);
 
   lv_obj_t *labelYes = lv_label_create(btnYes);
   lv_label_set_text(labelYes, "Ja, zuruecksetzen");
-  lv_obj_set_style_text_font(labelYes, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(labelYes, &lv_font_montserrat_16, 0);
   lv_obj_center(labelYes);
 
-  // "Abbrechen" button - full width, below
+  // "Abbrechen" button - BIG for finger touch
   lv_obj_t *btnNo = lv_btn_create(resetDialog);
-  lv_obj_set_size(btnNo, 180, 45);
-  lv_obj_align(btnNo, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_size(btnNo, 200, 80);
+  lv_obj_align(btnNo, LV_ALIGN_BOTTOM_MID, 0, -5);
   lv_obj_set_style_bg_color(btnNo, COLOR_GRAY, 0);
-  lv_obj_set_style_radius(btnNo, 6, 0);
+  lv_obj_set_style_radius(btnNo, 8, 0);
   lv_obj_add_event_cb(btnNo, resetDialogCallback, LV_EVENT_PRESSED, (void*)0);
 
   lv_obj_t *labelNo = lv_label_create(btnNo);
   lv_label_set_text(labelNo, "Abbrechen");
-  lv_obj_set_style_text_font(labelNo, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(labelNo, &lv_font_montserrat_16, 0);
   lv_obj_center(labelNo);
 }
 
@@ -543,12 +543,11 @@ String formatDuration(unsigned long totalSeconds) {
 // SD Card & Data Logging
 // ============================================================================
 
-SPIClass sdSPI(HSPI);
-
 bool initSDCard() {
-  sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  // SD card shares SPI bus with LCD (pins 39, 40, 38)
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
 
-  if (!SD.begin(SD_CS, sdSPI)) {
+  if (!SD.begin(SD_CS)) {
     Serial.println("[SD] Karte nicht gefunden!");
     return false;
   }
@@ -602,21 +601,21 @@ void logDataPoint() {
   Serial.printf("[SD] Datenpunkt geloggt: %s\n", line);
 }
 
-// Calculate estimated days until filter needs replacement based on usage rate
+// Calculate estimated replacement date based on usage rate since last peak (reset/replacement)
 String getFilterPrediction(int filterIdx) {
-  if (!sdCardOK) return "?";
+  if (!sdCardOK) return "";
 
   File f = SD.open(LOG_FILE, FILE_READ);
-  if (!f) return "?";
+  if (!f) return "";
 
-  // We need at least 2 data points to calculate rate
-  // Read first and last values for this filter
   f.readStringUntil('\n');  // Skip header
 
-  int firstValue = -1;
+  // Find the last peak (= last reset/replacement) by looking for value increases
+  int peakValue = -1;
+  unsigned long peakTime = 0;
   int lastValue = -1;
-  unsigned long firstTime = 0;
   unsigned long lastTime = 0;
+  int prevValue = -1;
 
   while (f.available()) {
     String line = f.readStringUntil('\n');
@@ -636,52 +635,74 @@ String getFilterPrediction(int filterIdx) {
 
     if (partIdx >= 9) {
       unsigned long timestamp = parts[1].toInt();
-      int filterValue = parts[3 + filterIdx].toInt();  // Filter values start at index 3
+      int filterValue = parts[3 + filterIdx].toInt();
 
-      if (firstValue < 0) {
-        firstValue = filterValue;
-        firstTime = timestamp;
+      // Detect peak: value increased significantly (filter was reset/replaced)
+      if (prevValue >= 0 && filterValue > prevValue + 2) {
+        // This is a reset - mark as new peak
+        peakValue = filterValue;
+        peakTime = timestamp;
       }
+
+      // Initialize peak with first value if not set
+      if (peakValue < 0) {
+        peakValue = filterValue;
+        peakTime = timestamp;
+      }
+
+      prevValue = filterValue;
       lastValue = filterValue;
       lastTime = timestamp;
     }
   }
   f.close();
 
-  // Calculate usage rate
-  if (firstValue < 0 || lastValue < 0 || lastTime <= firstTime) {
-    return "?";
+  // Calculate usage rate since last peak
+  if (peakValue < 0 || lastValue < 0 || lastTime <= peakTime) {
+    return "";
   }
 
-  int hoursDiff = firstValue - lastValue;  // Hours consumed
-  unsigned long timeDiffSec = lastTime - firstTime;
+  int hoursUsed = peakValue - lastValue;
+  unsigned long timeDiffSec = lastTime - peakTime;
 
-  if (hoursDiff <= 0 || timeDiffSec < 3600) {
-    // Not enough usage data yet (need at least 1 hour of data)
-    return "...";
+  // Need at least 2 hours used and 1 hour of tracking time for meaningful prediction
+  if (hoursUsed < 2 || timeDiffSec < 3600) {
+    return "";  // Not enough data yet
   }
 
-  // Calculate hours per day usage rate
-  float hoursPerDay = (float)hoursDiff / ((float)timeDiffSec / 86400.0);
+  // Calculate hours consumed per real-world day
+  float hoursPerDay = (float)hoursUsed / ((float)timeDiffSec / 86400.0);
 
-  if (hoursPerDay < 0.1) {
-    return ">1 Jahr";
+  // Sanity check: if usage rate is unrealistic, skip prediction
+  if (hoursPerDay < 0.1 || hoursPerDay > 24) {
+    return "";
   }
 
   // Days until empty
   float daysRemaining = (float)lastValue / hoursPerDay;
 
-  if (daysRemaining > 365) {
-    return ">1 Jahr";
-  } else if (daysRemaining > 30) {
-    int months = (int)(daysRemaining / 30);
-    return String(months) + " Mon.";
-  } else if (daysRemaining > 7) {
-    int weeks = (int)(daysRemaining / 7);
-    return String(weeks) + " Wo.";
-  } else {
-    return String((int)daysRemaining) + " Tage";
+  // Sanity check: if prediction is absurd (negative or extremely long), skip
+  if (daysRemaining < 0 || daysRemaining > 3650) {  // Max 10 years
+    return "";
   }
+
+  // Calculate actual date
+  time_t now = time(nullptr);
+  if (now < 1000000) {
+    // No real time available, show relative
+    if (daysRemaining > 365) return ">1 Jahr";
+    if (daysRemaining > 60) return "~" + String((int)(daysRemaining/30)) + " Mon.";
+    if (daysRemaining > 14) return "~" + String((int)(daysRemaining/7)) + " Wo.";
+    if (daysRemaining > 1) return "~" + String((int)daysRemaining) + " Tage";
+    return "<1 Tag";
+  }
+
+  // Return estimated date
+  time_t futureTime = now + (time_t)(daysRemaining * 86400);
+  struct tm *timeinfo = localtime(&futureTime);
+  char buf[16];
+  strftime(buf, sizeof(buf), "%d.%m.%y", timeinfo);
+  return String(buf);
 }
 
 String getHistoryData(int maxPoints = 288) {
@@ -1054,337 +1075,309 @@ void handleWebRoot() {
 <html><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AP2 Luftfilter Monitor</title>
+<title>AP2 Filter Status</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
-:root {
-  --bg-primary: #0f1419;
-  --bg-secondary: #15202b;
-  --bg-tertiary: #192734;
-  --bg-card: #1c2938;
-  --border: #38444d;
-  --text-primary: #ffffff;
-  --text-secondary: #8899a6;
-  --text-muted: #657786;
-  --accent: #1da1f2;
-  --accent-hover: #1a91da;
-  --success: #17bf63;
-  --warning: #ffad1f;
-  --danger: #e0245e;
-  --orange: #f45d22;
-}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:var(--bg-primary);color:var(--text-primary);line-height:1.5;min-height:100vh}
-.container{max-width:960px;margin:0 auto;padding:24px}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0f2f5;color:#333;font-size:15px;line-height:1.5}
+.wrap{max-width:600px;margin:0 auto;padding:0}
 /* Header */
-.header{display:flex;justify-content:space-between;align-items:center;padding:16px 0 32px}
-.logo{display:flex;align-items:center;gap:12px}
-.logo-icon{width:40px;height:40px;background:linear-gradient(135deg,var(--success),#0d9048);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px}
-.logo h1{font-size:1.25rem;font-weight:700;color:var(--text-primary)}
-.logo span{font-size:0.75rem;color:var(--text-muted);font-weight:400}
-.settings-btn{width:40px;height:40px;border-radius:50%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s}
-.settings-btn:hover{background:var(--bg-card);color:var(--text-primary);border-color:var(--text-muted)}
-.settings-btn svg{width:20px;height:20px}
-/* Grid */
-.grid{display:grid;gap:20px}
-.grid-stats{grid-template-columns:1fr 1fr}
-@media(max-width:640px){.grid-stats{grid-template-columns:1fr}}
+.topbar{background:linear-gradient(135deg,#8b1a1a 0%,#a02525 100%);padding:20px 24px;color:#fff;margin-bottom:24px}
+.topbar-inner{display:flex;justify-content:space-between;align-items:center;max-width:600px;margin:0 auto}
+.brand{display:flex;align-items:center;gap:12px}
+.brand-icon{width:40px;height:40px;background:rgba(255,255,255,0.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px}
+.brand h1{font-size:18px;font-weight:600;margin:0}
+.brand-sub{font-size:12px;opacity:0.8;margin-top:2px}
+.topbar a{color:#fff;opacity:0.9;font-size:13px;text-decoration:none;display:flex;align-items:center;gap:6px}
+.topbar a:hover{opacity:1}
+.content{max-width:600px;margin:0 auto;padding:0 24px 24px}
 /* Cards */
-.card{background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:24px}
-.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
-.card-title{font-size:0.75rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.1em}
-/* Status */
-.status-grid{display:flex;gap:32px}
-.status-item{display:flex;align-items:center;gap:10px}
-.status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
-.status-dot.success{background:var(--success);box-shadow:0 0 12px rgba(23,191,99,0.4)}
-.status-dot.warning{background:var(--warning);box-shadow:0 0 12px rgba(255,173,31,0.4)}
-.status-dot.danger{background:var(--danger);box-shadow:0 0 12px rgba(224,36,94,0.4)}
-.status-dot.muted{background:var(--text-muted)}
-.status-label{font-size:0.9rem;color:var(--text-secondary)}
-/* Laser stat */
-.stat-value{font-size:2.5rem;font-weight:700;color:var(--success);letter-spacing:-0.02em;line-height:1.1}
-.stat-label{font-size:0.875rem;color:var(--text-muted);margin-top:4px}
+.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08),0 1px 2px rgba(0,0,0,0.06);margin-bottom:20px;overflow:hidden}
+.card-header{padding:16px 20px;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center}
+.card-title{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:#8b1a1a}
+.card-body{padding:20px}
+/* Status Grid */
+.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.status-card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.08);display:flex;align-items:center;gap:16px}
+.status-icon{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px}
+.status-icon.ok{background:#dcfce7;color:#16a34a}
+.status-icon.warn{background:#fef3c7;color:#d97706}
+.status-icon.err{background:#fee2e2;color:#dc2626}
+.status-icon.off{background:#f3f4f6;color:#9ca3af}
+.status-info h3{font-size:14px;font-weight:600;color:#333;margin-bottom:2px}
+.status-info p{font-size:12px;color:#888;margin:0}
+/* Hero Metric */
+.hero-metric{text-align:center;padding:32px 20px}
+.hero-num{font-size:56px;font-weight:700;color:#8b1a1a;letter-spacing:-0.02em;line-height:1}
+.hero-label{font-size:14px;color:#888;margin-top:8px}
+.hero-sub{font-size:12px;color:#bbb;margin-top:4px}
 /* Filter bars */
-.filter-list{display:flex;flex-direction:column;gap:12px}
-.filter-bar{position:relative;height:48px;background:var(--bg-tertiary);border-radius:12px;overflow:hidden;border:1px solid var(--border)}
-.filter-fill{position:absolute;inset:0;border-radius:11px;transition:width 0.5s ease}
-.filter-fill.green{background:linear-gradient(90deg,#0d9048,var(--success))}
-.filter-fill.yellow{background:linear-gradient(90deg,#e6960a,var(--warning))}
-.filter-fill.orange{background:linear-gradient(90deg,#c44d1a,var(--orange))}
-.filter-fill.red{background:linear-gradient(90deg,#a11d42,var(--danger))}
-.filter-content{position:absolute;inset:0;display:flex;align-items:center;justify-content:space-between;padding:0 16px;z-index:1}
-.filter-name{font-weight:600;font-size:0.875rem;color:var(--text-primary);text-shadow:0 1px 2px rgba(0,0,0,0.3)}
-.filter-info{text-align:right}
-.filter-hours{font-weight:600;font-size:0.875rem;color:var(--text-primary);text-shadow:0 1px 2px rgba(0,0,0,0.3)}
-.filter-eta{font-size:0.75rem;color:rgba(255,255,255,0.7);margin-top:1px}
+.filters{display:flex;flex-direction:column;gap:10px}
+.fbar{position:relative;height:56px;background:#f3f4f6;border-radius:8px;overflow:hidden}
+.fbar-fill{position:absolute;top:0;left:0;bottom:0;border-radius:8px;transition:width 0.4s ease}
+.fbar-fill.g{background:linear-gradient(90deg,#16a34a,#22c55e)}
+.fbar-fill.y{background:linear-gradient(90deg,#d97706,#f59e0b)}
+.fbar-fill.o{background:linear-gradient(90deg,#c2410c,#ea580c)}
+.fbar-fill.r{background:linear-gradient(90deg,#8b1a1a,#dc2626)}
+.fbar-empty{animation:pulse-red 1.5s ease-in-out infinite}
+@keyframes pulse-red{0%,100%{box-shadow:0 0 0 0 rgba(139,26,26,0.4)}50%{box-shadow:0 0 12px 4px rgba(139,26,26,0.6)}}
+.fbar-content{position:absolute;inset:0;padding:10px 16px;display:flex;flex-direction:column;justify-content:center;z-index:1}
+.fbar-row{display:flex;justify-content:space-between;align-items:center}
+.fbar-name{font-weight:600;font-size:14px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.5),0 2px 6px rgba(0,0,0,0.4)}
+.fbar-hours{font-size:14px;font-weight:600;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.8),0 2px 8px rgba(0,0,0,0.6),1px 1px 0 rgba(0,0,0,0.3)}
+.fbar-pct{font-size:12px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.5),0 2px 6px rgba(0,0,0,0.4)}
+.fbar-eta{font-size:12px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.8),0 2px 8px rgba(0,0,0,0.6),1px 1px 0 rgba(0,0,0,0.3)}
 /* Chart */
-.chart-container{height:300px;margin-top:8px}
-/* Buttons */
-.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:9999px;font-size:0.875rem;font-weight:600;cursor:pointer;transition:all 0.2s;border:none;text-decoration:none}
-.btn-primary{background:var(--accent);color:#fff}
-.btn-primary:hover{background:var(--accent-hover)}
-.btn-secondary{background:var(--bg-tertiary);color:var(--text-secondary);border:1px solid var(--border)}
-.btn-secondary:hover{background:var(--bg-card);color:var(--text-primary)}
-/* Footer */
-.footer{text-align:center;padding:40px 0 24px;color:var(--text-muted);font-size:0.8rem}
+.chart-wrap{height:280px;padding:0}
+/* Links */
+.card-actions{display:flex;gap:12px;padding:16px 20px;border-top:1px solid #f0f0f0;background:#fafafa}
+a.action{font-size:13px;color:#8b1a1a;text-decoration:none;padding:8px 16px;border:1px solid #e5e5e5;border-radius:6px;background:#fff}
+a.action:hover{background:#8b1a1a;color:#fff;border-color:#8b1a1a}
 /* Modal */
-.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:1000;padding:24px}
-.modal-backdrop.open{display:flex}
-.modal{background:var(--bg-card);border:1px solid var(--border);border-radius:20px;width:100%;max-width:420px;animation:modalSlide 0.2s ease}
-@keyframes modalSlide{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-.modal-header{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid var(--border)}
-.modal-header h2{font-size:1.125rem;font-weight:700}
-.modal-close{width:32px;height:32px;border-radius:50%;background:transparent;border:none;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1.25rem;transition:all 0.15s}
-.modal-close:hover{background:var(--bg-tertiary);color:var(--text-primary)}
-.modal-body{padding:24px}
-.form-group{margin-bottom:20px}
-.form-label{display:block;font-size:0.8rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px}
-.form-input{width:100%;padding:14px 16px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:12px;color:var(--text-primary);font-size:1rem;transition:border-color 0.15s}
-.form-input:focus{outline:none;border-color:var(--accent)}
-.form-divider{height:1px;background:var(--border);margin:24px 0}
-.info-list{display:flex;flex-direction:column;gap:12px}
-.info-row{display:flex;justify-content:space-between;align-items:center}
-.info-key{color:var(--text-muted);font-size:0.875rem}
-.info-val{color:var(--text-secondary);font-size:0.875rem;font-weight:500}
-.modal-footer{display:flex;gap:12px;padding:0 24px 24px}
-.modal-footer .btn{flex:1;justify-content:center}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,0.4);display:none;align-items:center;justify-content:center;z-index:100}
+.overlay.open{display:flex}
+.modal{background:#fff;border-radius:12px;width:100%;max-width:400px;margin:24px;box-shadow:0 20px 40px rgba(0,0,0,0.15)}
+.modal-head{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #eee}
+.modal-head h2{font-size:16px;font-weight:600;color:#333}
+.close-btn{background:none;border:none;font-size:22px;cursor:pointer;color:#999;line-height:1}
+.close-btn:hover{color:#333}
+.modal-body{padding:20px}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:12px;font-weight:500;color:#666;margin-bottom:6px}
+.field input{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:6px;background:#fff;color:#333;font-size:15px}
+.field input:focus{outline:none;border-color:#8b1a1a}
+.divider{height:1px;background:#eee;margin:20px 0}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;font-size:13px}
+.info-grid dt{color:#888}
+.info-grid dd{text-align:right;color:#555}
+.modal-foot{display:flex;gap:10px;padding:0 20px 20px}
+.btn{flex:1;padding:10px 16px;font-size:14px;font-weight:500;cursor:pointer;border-radius:6px;border:1px solid #ddd;background:#f5f5f5;color:#555;transition:all 0.15s}
+.btn:hover{background:#eee;color:#333}
+.btn.primary{background:#8b1a1a;color:#fff;border-color:#8b1a1a}
+.btn.primary:hover{background:#6b1414}
+/* Footer */
+.foot-info{text-align:center;padding:16px;font-size:11px;color:#999}
+.foot-info span{margin:0 8px}
 </style>
 </head><body>
-<div class="container">
 
-<header class="header">
-  <div class="logo">
-    <div class="logo-icon">🌀</div>
-    <div>
-      <h1>AP2 Luftfilter</h1>
-      <span>xTool Air Purifier Monitor</span>
-    </div>
-  </div>
-  <button class="settings-btn" onclick="openSettings()" aria-label="Einstellungen">
-    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
-  </button>
-</header>
-
-<div class="grid grid-stats">
-  <div class="card">
-    <div class="card-header"><span class="card-title">System Status</span></div>
-    <div class="status-grid">
-      <div class="status-item">
-        <span class="status-dot )rawliteral";
-
-  // Connection status
-  if (ap2.connectionState == 1) html += "success";
-  else if (ap2.connectionState == 0) html += "warning";
-  else html += "danger";
-  html += R"rawliteral("></span>
-        <span class="status-label">BLE )rawliteral";
-  if (ap2.connectionState == 1) html += "Verbunden";
-  else if (ap2.connectionState == 0) html += "Suche...";
-  else html += "Fehler";
-  html += R"rawliteral(</span>
-      </div>
-      <div class="status-item">
-        <span class="status-dot )rawliteral";
-  html += ap2.fanRunning ? "success" : "muted";
-  html += R"rawliteral("></span>
-        <span class="status-label">Luefter )rawliteral";
-  html += ap2.fanRunning ? "An" : "Aus";
-  html += R"rawliteral(</span>
+<!-- Header -->
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-icon">&#9881;</div>
+      <div>
+        <h1>AP2 Luftfilter</h1>
+        <div class="brand-sub">Makerspace Guetersloh</div>
       </div>
     </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header"><span class="card-title">Laser Laufzeit</span></div>
-    <div class="stat-value">)rawliteral";
-  html += formatDuration(laserTotalSeconds);
-  html += R"rawliteral(</div>
-    <div class="stat-label">Gesamt Betriebsstunden</div>
+    <a href="#" onclick="openSettings();return false">&#9881; Einstellungen</a>
   </div>
 </div>
 
-<div class="card" style="margin-top:20px">
-  <div class="card-header"><span class="card-title">Filter Status</span></div>
-  <div class="filter-list">
+<div class="content">
+
+<!-- Status Cards -->
+<div class="status-grid">
+  <div class="status-card">
+    <div class="status-icon )rawliteral";
+
+  // Connection status icon
+  if (ap2.connectionState == 1) html += "ok";
+  else if (ap2.connectionState == 0) html += "warn";
+  else html += "err";
+  html += R"rawliteral(">&#9889;</div>
+    <div class="status-info">
+      <h3>Bluetooth</h3>
+      <p>)rawliteral";
+  if (ap2.connectionState == 1) html += "Verbunden";
+  else if (ap2.connectionState == 0) html += "Suche...";
+  else html += "Keine Verbindung";
+  html += R"rawliteral(</p>
+    </div>
+  </div>
+  <div class="status-card">
+    <div class="status-icon )rawliteral";
+  html += ap2.fanRunning ? "ok" : "off";
+  html += R"rawliteral(">&#9728;</div>
+    <div class="status-info">
+      <h3>Luefter</h3>
+      <p>)rawliteral";
+  html += ap2.fanRunning ? "Aktiv" : "Aus";
+  html += R"rawliteral(</p>
+    </div>
+  </div>
+</div>
+
+<!-- Laser Runtime Card -->
+<div class="card">
+  <div class="hero-metric">
+    <div class="hero-num">)rawliteral";
+  html += formatDuration(laserTotalSeconds);
+  html += R"rawliteral(</div>
+    <div class="hero-label">Laser Gesamtlaufzeit</div>
+    <div class="hero-sub">seit Inbetriebnahme</div>
+  </div>
+</div>
+
+<!-- Filter Status Card -->
+<div class="card">
+  <div class="card-header">
+    <span class="card-title">Filterstatus</span>
+  </div>
+  <div class="card-body">
+    <div class="filters">
 )rawliteral";
 
-  // Filter bars with new design
+  // Filter bars - display style
   for (int i = 0; i < 6; i++) {
     int percent = (filters[i].remainingHours * 100) / filters[i].maxHours;
     percent = constrain(percent, 0, 100);
-    String colorClass = percent > 50 ? "green" : (percent > 25 ? "yellow" : (percent > 10 ? "orange" : "red"));
-
+    String colorClass = percent > 50 ? "g" : (percent > 25 ? "y" : (percent > 10 ? "o" : "r"));
     String prediction = getFilterPrediction(i);
-    html += "<div class='filter-bar'>";
-    html += "<div class='filter-fill " + colorClass + "' style='width:" + String(max(percent, 3)) + "%'></div>";
-    html += "<div class='filter-content'>";
-    html += "<span class='filter-name'>" + String(filters[i].name) + "</span>";
-    html += "<div class='filter-info'><span class='filter-hours'>" + String(filters[i].remainingHours) + "h / " + String(filters[i].maxHours) + "h</span>";
-    html += "<div class='filter-eta'>" + prediction + "</div></div>";
+
+    // Empty filter (0%) gets full red background
+    if (percent == 0) {
+      html += "<div class='fbar fbar-empty'>";
+      html += "<div class='fbar-fill r' style='width:100%'></div>";
+    } else {
+      html += "<div class='fbar'>";
+      html += "<div class='fbar-fill " + colorClass + "' style='width:" + String(percent) + "%'></div>";
+    }
+    html += "<div class='fbar-content'>";
+    html += "<div class='fbar-row'>";
+    html += "<span class='fbar-name'>" + String(filters[i].name) + "</span>";
+    html += "<span class='fbar-hours'>" + String(filters[i].remainingHours) + "/" + String(filters[i].maxHours) + "h</span>";
+    html += "</div>";
+    html += "<div class='fbar-row'>";
+    html += "<span class='fbar-pct'>" + String(percent) + "%</span>";
+    html += "<span class='fbar-eta'>" + (prediction.length() > 0 ? prediction : "-") + "</span>";
+    html += "</div>";
     html += "</div></div>";
   }
 
   html += R"rawliteral(
+    </div>
   </div>
 </div>
 
-<div class="card" style="margin-top:20px">
+<!-- History Chart Card -->
+<div class="card">
   <div class="card-header">
-    <span class="card-title">Filter Verlauf</span>
-    <a href="/download/history.csv" class="btn btn-secondary">CSV Export</a>
+    <span class="card-title">Verlauf</span>
   </div>
-  <div class="chart-container">
-    <canvas id="historyChart"></canvas>
+  <div class="card-body">
+    <div class="chart-wrap"><canvas id="chart"></canvas></div>
+  </div>
+  <div class="card-actions">
+    <a href="/download/history.csv" class="action">CSV herunterladen</a>
   </div>
 </div>
 
-<footer class="footer">
-  AP2 Luftfilter Monitor &bull; Waveshare ESP32-S3
-</footer>
+<!-- Footer Info -->
+<div class="foot-info">
+  <span>IP: )rawliteral";
+  html += WiFi.localIP().toString();
+  html += R"rawliteral(</span>
+  <span>SD: )rawliteral";
+  html += sdCardOK ? "OK" : "-";
+  html += R"rawliteral(</span>
+  <span>Uptime: )rawliteral";
+  html += formatDuration(millis() / 1000);
+  html += R"rawliteral(</span>
+</div>
 
-</div><!-- /container -->
+</div>
 
-<!-- Settings Modal -->
-<div class="modal-backdrop" id="settingsModal">
+<!-- Settings -->
+<div class="overlay" id="modal">
   <div class="modal">
-    <div class="modal-header">
+    <div class="modal-head">
       <h2>Einstellungen</h2>
-      <button class="modal-close" onclick="closeSettings()">&times;</button>
+      <button class="close-btn" onclick="closeSettings()">&times;</button>
     </div>
     <div class="modal-body">
       <form id="settingsForm">
-        <div class="form-group">
-          <label class="form-label">Nachlaufzeit (Sekunden)</label>
-          <input class="form-input" type="number" id="fanDelay" value=")rawliteral";
+        <div class="field">
+          <label>Nachlaufzeit (Sek.)</label>
+          <input type="number" id="fanDelay" value=")rawliteral";
   html += String(fanDelaySeconds);
   html += R"rawliteral(" min="0" max="300" step="5">
         </div>
-        <div class="form-group">
-          <label class="form-label">Laser Betriebsstunden</label>
-          <input class="form-input" type="number" id="laserHours" value=")rawliteral";
+        <div class="field">
+          <label>Laser Stunden</label>
+          <input type="number" id="laserHours" value=")rawliteral";
   html += String(laserTotalSeconds / 3600);
   html += R"rawliteral(" min="0" step="1">
         </div>
-        <div class="form-divider"></div>
-        <div class="info-list">
-          <div class="info-row"><span class="info-key">IP Adresse</span><span class="info-val">)rawliteral";
+        <div class="divider"></div>
+        <dl class="info-grid">
+          <dt>IP</dt><dd>)rawliteral";
   html += WiFi.localIP().toString();
-  html += R"rawliteral(</span></div>
-          <div class="info-row"><span class="info-key">OTA Hostname</span><span class="info-val">ap2-luftfilter.local</span></div>
-          <div class="info-row"><span class="info-key">Uptime</span><span class="info-val">)rawliteral";
+  html += R"rawliteral(</dd>
+          <dt>Hostname</dt><dd>ap2-luftfilter.local</dd>
+          <dt>Uptime</dt><dd>)rawliteral";
   html += formatDuration(millis() / 1000);
-  html += R"rawliteral(</span></div>
-          <div class="info-row"><span class="info-key">SD Karte</span><span class="info-val">)rawliteral";
-  html += sdCardOK ? "OK" : "Nicht gefunden";
-  html += R"rawliteral(</span></div>
-        </div>
+  html += R"rawliteral(</dd>
+          <dt>SD</dt><dd>)rawliteral";
+  html += sdCardOK ? "OK" : "---";
+  html += R"rawliteral(</dd>
+        </dl>
       </form>
     </div>
-    <div class="modal-footer">
-      <button type="button" class="btn btn-secondary" onclick="closeSettings()">Abbrechen</button>
-      <button type="submit" form="settingsForm" class="btn btn-primary">Speichern</button>
+    <div class="modal-foot">
+      <button type="button" class="btn" onclick="closeSettings()">Abbrechen</button>
+      <button type="submit" form="settingsForm" class="btn primary">Speichern</button>
     </div>
   </div>
 </div>
 
 <script>
-// Modal
-function openSettings() {
-  document.getElementById('settingsModal').classList.add('open');
-}
-function closeSettings() {
-  document.getElementById('settingsModal').classList.remove('open');
-}
-document.getElementById('settingsModal').addEventListener('click', (e) => {
-  if (e.target.classList.contains('modal-backdrop')) closeSettings();
-});
+function openSettings(){document.getElementById('modal').classList.add('open')}
+function closeSettings(){document.getElementById('modal').classList.remove('open')}
+document.getElementById('modal').addEventListener('click',e=>{if(e.target.classList.contains('overlay'))closeSettings()});
 
-// Settings form
-document.getElementById('settingsForm').addEventListener('submit', async (e) => {
+document.getElementById('settingsForm').addEventListener('submit',async e=>{
   e.preventDefault();
-  const fanDelay = document.getElementById('fanDelay').value;
-  const laserHours = document.getElementById('laserHours').value;
-
-  const response = await fetch('/api/settings', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fanDelay: parseInt(fanDelay), laserHours: parseInt(laserHours) })
+  await fetch('/api/settings',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({fanDelay:+document.getElementById('fanDelay').value,laserHours:+document.getElementById('laserHours').value})
   });
-
-  if (response.ok) {
-    closeSettings();
-    location.reload();
-  }
+  closeSettings();
+  location.reload();
 });
 
-// History Chart
-fetch('/api/history')
-  .then(r => r.json())
-  .then(data => {
-    if (data.length === 0) return;
-
-    const labels = data.map((d, i) => {
-      const mins = Math.floor(d.t / 60);
-      const hrs = Math.floor(mins / 60);
-      return hrs + 'h';
-    });
-
-    const filterNames = ['Zyklon', 'Vorfilter', 'Medium', 'Aktivkohle', 'Carbon', 'HEPA'];
-    const colors = ['#17bf63', '#8BC34A', '#1da1f2', '#26A69A', '#9C27B0', '#e0245e'];
-
-    const datasets = filterNames.map((name, i) => ({
-      label: name,
-      data: data.map(d => d.f[i]),
-      borderColor: colors[i],
-      backgroundColor: colors[i] + '15',
-      borderWidth: 2,
-      fill: true,
-      tension: 0.4,
-      pointRadius: 0,
-      pointHoverRadius: 4
-    }));
-
-    new Chart(document.getElementById('historyChart'), {
-      type: 'line',
-      data: { labels, datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { intersect: false, mode: 'index' },
-        plugins: {
-          legend: {
-            position: 'bottom',
-            labels: { color: '#8899a6', boxWidth: 12, padding: 16, font: { size: 11 } }
-          },
-          tooltip: {
-            backgroundColor: '#1c2938',
-            titleColor: '#fff',
-            bodyColor: '#8899a6',
-            borderColor: '#38444d',
-            borderWidth: 1,
-            padding: 12,
-            cornerRadius: 8
-          }
-        },
-        scales: {
-          y: {
-            beginAtZero: true,
-            grid: { color: '#192734', drawBorder: false },
-            ticks: { color: '#657786', font: { size: 11 } },
-            title: { display: true, text: 'Stunden', color: '#657786', font: { size: 11 } }
-          },
-          x: {
-            grid: { display: false },
-            ticks: { color: '#657786', maxTicksLimit: 10, font: { size: 11 } }
-          }
-        }
-      }
-    });
+fetch('/api/history').then(r=>r.json()).then(data=>{
+  if(!data.length)return;
+  // Format time labels based on duration
+  const maxT=data[data.length-1].t;
+  const labels=data.map(d=>{
+    const mins=Math.floor(d.t/60);
+    const hrs=Math.floor(mins/60);
+    if(maxT<3600)return mins+'m';
+    if(maxT<86400)return hrs+'h'+String(mins%60).padStart(2,'0')+'m';
+    return hrs+'h';
   });
+  const names=['Zyklon','Vorfilter','Medium','Aktivkohle','Carbon','HEPA'];
+  const colors=['#16a34a','#65a30d','#8b1a1a','#0891b2','#7c3aed','#db2777'];
+  const datasets=names.map((n,i)=>({label:n,data:data.map(d=>d.f[i]),borderColor:colors[i],backgroundColor:colors[i]+'15',borderWidth:2,tension:0.3,pointRadius:0,fill:true}));
+  new Chart(document.getElementById('chart'),{
+    type:'line',data:{labels,datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{intersect:false,mode:'index'},
+      plugins:{legend:{position:'bottom',labels:{boxWidth:12,padding:14,font:{size:11},color:'#666'}},
+        tooltip:{backgroundColor:'#fff',titleColor:'#333',bodyColor:'#555',borderColor:'#ddd',borderWidth:1,padding:10,cornerRadius:6}},
+      scales:{
+        y:{beginAtZero:false,grid:{color:'#eee'},ticks:{font:{size:11},color:'#888'},title:{display:true,text:'Stunden',color:'#666',font:{size:11}}},
+        x:{grid:{display:false},ticks:{font:{size:10},color:'#888',maxTicksLimit:10}}
+      }
+    }
+  });
+});
 
-// Auto-refresh every 30 seconds
-setTimeout(() => location.reload(), 30000);
+setTimeout(()=>location.reload(),30000);
 </script>
 </body></html>)rawliteral";
 
